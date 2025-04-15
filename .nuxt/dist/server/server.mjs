@@ -1,0 +1,1 @@
+export { default } from "file:///D:/Kereli/shaxsiy/projects/seeingai/node_modules/@nuxt/vite-builder/dist/runtime/vite-node.mjs"
