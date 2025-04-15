@@ -4,7 +4,7 @@
     <video ref="videoRef" autoplay playsinline muted width="100%" height="480" class="border" />
     <ul v-if="results.length" class="mt-4 space-y-1">
       <li v-for="(r, i) in results" :key="i">
-        {{ translateLabel(r.class) }} — {{ (r.score * 100).toFixed(2) }}% — Masofa: {{ estimateDistance(r.bbox[3]) }}
+        {{ translateLabel(r.class) }} — {{ (r.score * 100).toFixed(2) }}% — {{ estimateDistance(r.bbox[3]) }}
       </li>
     </ul>
   </div>
@@ -18,6 +18,7 @@ import '@tensorflow/tfjs-backend-webgl'
 
 const videoRef = ref(null)
 const results = ref([])
+let isSpeaking = false
 
 let previousSpoken = ''
 let model = null
@@ -60,21 +61,26 @@ function estimateDistance(boxHeight) {
 
   let distanceMeters = (OBJECT_REAL_HEIGHT * focalLength) / boxHeight;
 
-  // Empirik kalibratsiya (masofa 3 barobar katta chiqayotgan bo‘lsa, uni 1/3 ga kamaytiramiz)
-  const calibrationFactor = 0.33; // Yoki siz o‘z tajribangizga qarab aniqlaysiz
+  const calibrationFactor = 0.33; // Tajriba asosida aniqlangan
   distanceMeters *= calibrationFactor;
 
   const stepLength = 0.75;
   const steps = distanceMeters / stepLength;
 
-  return {
-    distance: distanceMeters.toFixed(2) + " metr",
-    steps: steps < 1 ? "0.5-1 qadam" : Math.round(steps) + " qadam"
-  };
+  // Obyekt emas, oddiy matn qaytariladi
+  const distanceText = distanceMeters.toFixed(2) + " metr";
+  const stepsText = steps < 1 ? "0.5-1 qadam" : Math.round(steps) + " qadam";
+
+  return `gacha: ${distanceText}`;
 }
 
+
 async function speak(text) {
-  const token = 'dwLgjgpzeL95yeM-Ire3jONafy1_uIBWETbC2deF'
+  if (isSpeaking) return // Agar gapirayotgan bo‘lsa, qaytamiz
+
+  isSpeaking = true
+
+  const token = 'f9q208KY3hraE64wU2rHHz0FtzhAk7K6XFCmMMLD'
   const speaker_id = 1
 
   const formData = new URLSearchParams()
@@ -93,21 +99,32 @@ async function speak(text) {
 
     if (!response.ok) {
       console.error('❌ Audio olishda xatolik:', response.statusText)
+      isSpeaking = false
       return
     }
 
     const blob = await response.blob()
     const audioUrl = URL.createObjectURL(blob)
     const audio = new Audio(audioUrl)
-    await audio.play()
 
-    // Gapirib bo‘lishini kutamiz (taxminan 3s)
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await new Promise((resolve) => {
+      audio.onended = () => {
+        isSpeaking = false
+        resolve()
+      }
+      audio.onerror = () => {
+        isSpeaking = false
+        resolve()
+      }
+      audio.play()
+    })
 
   } catch (err) {
     console.error('❌ TTS xatosi:', err)
+    isSpeaking = false
   }
 }
+
 
 async function detectLoop() {
   while (true) {
