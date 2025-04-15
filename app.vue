@@ -20,7 +20,7 @@ const videoRef = ref(null)
 const results = ref([])
 
 let previousSpoken = ''
-let speakCooldown = false
+let model = null
 
 const uzbekLabels = {
   person: "odam",
@@ -52,17 +52,28 @@ function translateLabel(label) {
 }
 
 function estimateDistance(boxHeight) {
-  const REAL_OBJECT_HEIGHT = 1.6
-  const FOCAL_LENGTH = 500
-  const distanceInMeters = (REAL_OBJECT_HEIGHT * FOCAL_LENGTH) / boxHeight
-  const steps = distanceInMeters / 0.75
-  return Math.round(steps) + " qadam"
+  const OBJECT_REAL_HEIGHT = 1.6; // metr
+  const IMAGE_HEIGHT_IN_PIXELS = 480;
+  const CAMERA_VERTICAL_FOV = Math.PI / 3; // 60°
+
+  const focalLength = IMAGE_HEIGHT_IN_PIXELS / (2 * Math.tan(CAMERA_VERTICAL_FOV / 2));
+
+  let distanceMeters = (OBJECT_REAL_HEIGHT * focalLength) / boxHeight;
+
+  // Empirik kalibratsiya (masofa 3 barobar katta chiqayotgan bo‘lsa, uni 1/3 ga kamaytiramiz)
+  const calibrationFactor = 0.33; // Yoki siz o‘z tajribangizga qarab aniqlaysiz
+  distanceMeters *= calibrationFactor;
+
+  const stepLength = 0.75;
+  const steps = distanceMeters / stepLength;
+
+  return {
+    distance: distanceMeters.toFixed(2) + " metr",
+    steps: steps < 1 ? "0.5-1 qadam" : Math.round(steps) + " qadam"
+  };
 }
 
 async function speak(text) {
-  if (speakCooldown) return // 3 soniya ichida gapirib bo‘lsa, chiqib ketamiz
-
-  speakCooldown = true // gapiryapti deb belgilaymiz
   const token = 'dwLgjgpzeL95yeM-Ire3jONafy1_uIBWETbC2deF'
   const speaker_id = 1
 
@@ -82,23 +93,43 @@ async function speak(text) {
 
     if (!response.ok) {
       console.error('❌ Audio olishda xatolik:', response.statusText)
-      speakCooldown = false
       return
     }
 
     const blob = await response.blob()
     const audioUrl = URL.createObjectURL(blob)
     const audio = new Audio(audioUrl)
-    audio.play()
+    await audio.play()
 
-    // Gapirib bo‘lgach 3 soniya kutamiz
-    setTimeout(() => {
-      speakCooldown = false
-    }, 3000)
+    // Gapirib bo‘lishini kutamiz (taxminan 3s)
+    await new Promise(resolve => setTimeout(resolve, 1000))
 
   } catch (err) {
     console.error('❌ TTS xatosi:', err)
-    speakCooldown = false
+  }
+}
+
+async function detectLoop() {
+  while (true) {
+    if (videoRef.value && model) {
+      const predictions = await model.detect(videoRef.value)
+      results.value = predictions
+
+      if (predictions.length) {
+        const first = predictions[0]
+        const label = translateLabel(first.class)
+        const distance = estimateDistance(first.bbox[3])
+        const spoken = `${label}, ${distance}`
+
+        if (spoken !== previousSpoken) {
+          previousSpoken = spoken
+          await speak(spoken)
+        }
+      }
+    }
+
+    // Har 1 sekundda detect ishlaydi
+    await new Promise(resolve => setTimeout(resolve, 1000))
   }
 }
 
@@ -124,32 +155,14 @@ onMounted(async () => {
     return
   }
 
-  const model = await cocoSsd.load()
+  model = await cocoSsd.load()
   console.log('✅ Model yuklandi')
 
-  const detect = async () => {
-    if (videoRef.value && model) {
-      const predictions = await model.detect(videoRef.value)
-      results.value = predictions
-
-      if (predictions.length) {
-        const first = predictions[0]
-        const label = translateLabel(first.class)
-        const distance = estimateDistance(first.bbox[3])
-        const spoken = `${label}, ${distance}`
-
-        if (spoken !== previousSpoken) {
-          speak(spoken)
-          previousSpoken = spoken
-        }
-      }
-    }
-    requestAnimationFrame(detect)
-  }
-
-  detect()
+  // Asosiy doimiy aniqlash sikli
+  detectLoop()
 })
 </script>
+
 
 
 
