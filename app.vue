@@ -1,10 +1,10 @@
 <template>
-  <div class="w-full h-screen bg-blue-900 text-white p-4">
-    <h1 class="text-2xl font-bold mb-2">Objektlarni aniqlash (ko‘zi ojizlar uchun)</h1>
-    <video ref="videoRef" autoplay playsinline muted class="w-full max-h-[480px] border" />
-    <ul v-if="results.length" class="mt-4 space-y-2">
+  <div style="width: 100%; height: 100vh; background-color: blue; color: white; padding: 4px;">
+    <h1>Objektlarni aniqlash (ko‘zi ojizlar uchun)</h1>
+    <video ref="videoRef" autoplay playsinline muted width="100%" height="480" class="border" />
+    <ul v-if="results.length" class="mt-4 space-y-1">
       <li v-for="(r, i) in results" :key="i">
-        {{ r.class }} — {{ (r.score * 100).toFixed(1) }}% — Masofa: {{ estimateDistance(r.bbox[3]) }}
+        {{ translateLabel(r.class) }} — {{ (r.score * 100).toFixed(2) }}% — Masofa: {{ estimateDistance(r.bbox[3]) }}
       </li>
     </ul>
   </div>
@@ -18,21 +18,88 @@ import '@tensorflow/tfjs-backend-webgl'
 
 const videoRef = ref(null)
 const results = ref([])
-let lastSpoken = ref('')
 
-function estimateDistance(boxHeight) {
-  const REAL_OBJECT_HEIGHT = 1.6 // metrda
-  const FOCAL_LENGTH = 500 // tajribaviy
-  const distanceInMeters = (REAL_OBJECT_HEIGHT * FOCAL_LENGTH) / boxHeight
-  const steps = distanceInMeters / 0.75 // 1 qadam ≈ 0.75 m
-  return Math.round(steps) + ' qadam'
+let previousSpoken = ''
+let speakCooldown = false
+
+const uzbekLabels = {
+  person: "odam",
+  bicycle: "velosiped",
+  car: "mashina",
+  motorcycle: "mototsikl",
+  airplane: "samolyot",
+  bus: "avtobus",
+  train: "poyezd",
+  truck: "yuk mashinasi",
+  boat: "qayiq",
+  bird: "qush",
+  cat: "mushuk",
+  dog: "it",
+  horse: "ot",
+  sheep: "qo‘y",
+  cow: "sigir",
+  bottle: "shisha",
+  chair: "stul",
+  backpack: "ryukzak",
+  tv: "televizor",
+  laptop: "noutbuk",
+  book: "kitob",
+  cellphone: "telefon"
 }
 
-function speak(text) {
-  const utterance = new SpeechSynthesisUtterance(text)
-  utterance.lang = 'uz-UZ' // yoki 'en-US' kerak bo‘lsa
-  speechSynthesis.cancel() // eski gapni to‘xtatish
-  speechSynthesis.speak(utterance)
+function translateLabel(label) {
+  return uzbekLabels[label] || label
+}
+
+function estimateDistance(boxHeight) {
+  const REAL_OBJECT_HEIGHT = 1.6
+  const FOCAL_LENGTH = 500
+  const distanceInMeters = (REAL_OBJECT_HEIGHT * FOCAL_LENGTH) / boxHeight
+  const steps = distanceInMeters / 0.75
+  return Math.round(steps) + " qadam"
+}
+
+async function speak(text) {
+  if (speakCooldown) return // 3 soniya ichida gapirib bo‘lsa, chiqib ketamiz
+
+  speakCooldown = true // gapiryapti deb belgilaymiz
+  const token = 'dwLgjgpzeL95yeM-Ire3jONafy1_uIBWETbC2deF'
+  const speaker_id = 1
+
+  const formData = new URLSearchParams()
+  formData.append('token', token)
+  formData.append('text', text)
+  formData.append('speaker_id', speaker_id)
+
+  try {
+    const response = await fetch('https://api.muxlisa.uz/v1/api/services/tts/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: formData,
+    })
+
+    if (!response.ok) {
+      console.error('❌ Audio olishda xatolik:', response.statusText)
+      speakCooldown = false
+      return
+    }
+
+    const blob = await response.blob()
+    const audioUrl = URL.createObjectURL(blob)
+    const audio = new Audio(audioUrl)
+    audio.play()
+
+    // Gapirib bo‘lgach 3 soniya kutamiz
+    setTimeout(() => {
+      speakCooldown = false
+    }, 3000)
+
+  } catch (err) {
+    console.error('❌ TTS xatosi:', err)
+    speakCooldown = false
+  }
 }
 
 onMounted(async () => {
@@ -42,11 +109,11 @@ onMounted(async () => {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment' } // orqa kamera
+      video: { facingMode: 'environment' }
     })
     videoRef.value.srcObject = stream
 
-    await new Promise((resolve) => {
+    await new Promise(resolve => {
       videoRef.value.onloadeddata = () => {
         console.log('🎥 Kamera tayyor')
         resolve()
@@ -65,16 +132,15 @@ onMounted(async () => {
       const predictions = await model.detect(videoRef.value)
       results.value = predictions
 
-      // Faqat eng aniq topilgan narsani gapir
-      if (predictions.length > 0) {
-        const best = predictions[0]
-        const objectName = best.class
-        const distance = estimateDistance(best.bbox[3])
-        const message = `${objectName} ${distance}`
+      if (predictions.length) {
+        const first = predictions[0]
+        const label = translateLabel(first.class)
+        const distance = estimateDistance(first.bbox[3])
+        const spoken = `${label}, ${distance}`
 
-        if (message !== lastSpoken.value) {
-          speak(message)
-          lastSpoken.value = message
+        if (spoken !== previousSpoken) {
+          speak(spoken)
+          previousSpoken = spoken
         }
       }
     }
@@ -84,6 +150,8 @@ onMounted(async () => {
   detect()
 })
 </script>
+
+
 
 <style scoped>
 * {
