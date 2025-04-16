@@ -163,11 +163,12 @@ async function detectLoop() {
         const distance = estimateDistance(first.bbox[3])
 
         let extraText = ''
-        if (first.class === 'bottle') {
-          const textOnBottle = await detectTextFromRegion(videoRef.value, first.bbox)
-          extraText = textOnBottle
-            ? `, ustidagi yozuv: ${textOnBottle}`
-            : ', ustida yozuv topilmadi'
+        // OCR barcha obyektlar uchun qo'llanadi
+        const textOnObject = await detectTextFromRegion(videoRef.value, first.bbox)
+        if (textOnObject) {
+          extraText = `, ustidagi yozuv: ${textOnObject}`
+        } else {
+          extraText = ', ustida yozuv topilmadi'
         }
 
         const spoken = `${label}, ${distance}${extraText}`
@@ -182,6 +183,7 @@ async function detectLoop() {
     await new Promise(resolve => setTimeout(resolve, 1000))
   }
 }
+
 
 onMounted(async () => {
   await tf.setBackend('webgl')
