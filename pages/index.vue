@@ -1,12 +1,25 @@
 <template>
-  <div>
-    <video ref="videoRef" autoplay playsinline muted class="w-full h-[600px]" />
-    <ul v-if="results.length" class="mt-4 space-y-1">
-      <li v-for="(r, i) in results" :key="i">
-        {{ translateLabel(r.class) }} — {{ (r.score * 100).toFixed(2) }}% — {{ estimateDistance(r.bbox[3]) }}
-      </li>
-      <li>{{ videotext }}</li>
-    </ul>
+  <div class="flex flex-col items-center justify-between bg-[#071c39] min-h-screen py-4 px-2">
+    <!-- Video Container (Fixed on Scroll) -->
+    <div class="relative w-full max-w-4xl mb-3 flex items-center justify-center">
+      <video ref="videoRef" autoplay playsinline muted class="w-[99%] sm:w-[375px] h-[500px] object-cover rounded-xl shadow-lg border-2 border-gray-300 fixed top-0 z-10" />
+    </div>
+
+    <!-- Results Section -->
+    <div v-if="results.length" class="w-full max-w-4xl bg-gray-100 p-3 mt-[620px] rounded-md">
+      <h2 class="text-2xl font-semibold text-gray-800 mb-4">Aniqlangan buyum</h2>
+      <ul class="bg-white rounded-lg shadow-md p-4 space-y-3">
+        <li v-for="(r, i) in results" :key="i" class="flex items-center justify-between text-gray-700 border-b border-gray-200 pb-2">
+          <span class="font-medium">{{ translateLabel(r.class) }}</span>
+          <span class="text-sm text-gray-500">{{ (r.score * 100).toFixed(2) }}% — {{ estimateDistance(r.bbox[3]) }}</span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Loader -->
+    <div v-if="!model" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 z-20">
+      <div class="loader">Loading...</div> <!-- Add your loading spinner here -->
+    </div>
   </div>
 </template>
 
@@ -15,14 +28,13 @@ import { ref, onMounted } from 'vue'
 import * as cocoSsd from '@tensorflow-models/coco-ssd'
 import * as tf from '@tensorflow/tfjs'
 import '@tensorflow/tfjs-backend-webgl'
-import Tesseract from 'tesseract.js'
 
 const videoRef = ref(null)
 const results = ref([])
 let isSpeaking = false
+
 let previousSpoken = ''
 let model = null
-let videotext = null
 
 const uzbekLabels = {
   person: "odam",
@@ -54,25 +66,30 @@ function translateLabel(label) {
 }
 
 function estimateDistance(boxHeight) {
-  const OBJECT_REAL_HEIGHT = 1.6
-  const IMAGE_HEIGHT_IN_PIXELS = 480
-  const CAMERA_VERTICAL_FOV = Math.PI / 3
-  const focalLength = IMAGE_HEIGHT_IN_PIXELS / (2 * Math.tan(CAMERA_VERTICAL_FOV / 2))
-  let distanceMeters = (OBJECT_REAL_HEIGHT * focalLength) / boxHeight
-  const calibrationFactor = 0.33
-  distanceMeters *= calibrationFactor
+  const OBJECT_REAL_HEIGHT = 1.6; // metr
+  const IMAGE_HEIGHT_IN_PIXELS = 480;
+  const CAMERA_VERTICAL_FOV = Math.PI / 3; // 60°
 
-  const stepLength = 0.75
-  const steps = distanceMeters / stepLength
+  const focalLength = IMAGE_HEIGHT_IN_PIXELS / (2 * Math.tan(CAMERA_VERTICAL_FOV / 2));
 
-  const distanceText = distanceMeters.toFixed(2) + " metr"
-  const stepsText = steps < 1 ? "0.5-1 qadam" : Math.round(steps) + " qadam"
+  let distanceMeters = (OBJECT_REAL_HEIGHT * focalLength) / boxHeight;
 
-  return `gacha: ${distanceText}`
+  const calibrationFactor = 0.33; // Tajriba asosida aniqlangan
+  distanceMeters *= calibrationFactor;
+
+  const stepLength = 0.75;
+  const steps = distanceMeters / stepLength;
+
+  // Obyekt emas, oddiy matn qaytariladi
+  const distanceText = distanceMeters.toFixed(2) + " metr";
+  const stepsText = steps < 1 ? "0.5-1 qadam" : Math.round(steps) + " qadam";
+
+  return `gacha: ${distanceText}`;
 }
 
 async function speak(text) {
-  if (isSpeaking) return
+  if (isSpeaking) return // Agar gapirayotgan bo‘lsa, qaytamiz
+
   isSpeaking = true
 
   const token = 'f9q208KY3hraE64wU2rHHz0FtzhAk7K6XFCmMMLD'
@@ -120,70 +137,39 @@ async function speak(text) {
   }
 }
 
-async function detectTextFromRegion(videoEl, bbox) {
-  const canvas = document.createElement('canvas')
-  const context = canvas.getContext('2d')
-
-  const [x, y, width, height] = bbox
-  canvas.width = width
-  canvas.height = height
-
-  context.drawImage(videoEl, x, y, width, height, 0, 0, width, height)
-
-  // OCR uchun rasmni yaxshilash
-  context.filter = 'contrast(150%) brightness(120%)';  // Rasmni yaxshilash
-  context.drawImage(videoEl, x, y, width, height, 0, 0, width, height)
-
-  // Debug: Kesilgan rasmni ko‘rsatish
-  const previewImg = canvas.toDataURL()
-  console.log("📸 OCR rasm preview:", previewImg)
-
-  try {
-    const { data: { text } } = await Tesseract.recognize(canvas, 'eng', {
-      logger: m => console.log('📚 OCR jarayoni:', m)
-    })
-    console.log("📝 OCR natijasi:", text)
-    videotext = text;
-    return text.trim()
-  } catch (err) {
-    console.error('❌ OCR xatosi:', err)
-    return ''
-  }
-}
-
 async function detectLoop() {
-  while (true) {
-    if (videoRef.value && model) {
-      const predictions = await model.detect(videoRef.value)
-      results.value = predictions
+  let lastDetectionTime = Date.now()
 
-      if (predictions.length) {
-        const first = predictions[0]
-        const label = translateLabel(first.class)
-        const distance = estimateDistance(first.bbox[3])
+  async function detect() {
+    const currentTime = Date.now()
 
-        let extraText = ''
-        // OCR barcha obyektlar uchun qo'llanadi
-        const textOnObject = await detectTextFromRegion(videoRef.value, first.bbox)
-        if (textOnObject) {
-          extraText = `, ustidagi yozuv: ${textOnObject}`
-        } else {
-          extraText = ', ustida yozuv topilmadi'
-        }
+    // Check if enough time has passed before running the next detection
+    if (currentTime - lastDetectionTime > 1000) {  // run detection every second
+      if (videoRef.value && model) {
+        const predictions = await model.detect(videoRef.value)
+        results.value = predictions
 
-        const spoken = `${label}, ${distance}${extraText}`
+        if (predictions.length) {
+          const first = predictions[0]
+          const label = translateLabel(first.class)
+          const distance = estimateDistance(first.bbox[3])
+          const spoken = `${label}, ${distance}`
 
-        if (spoken !== previousSpoken) {
-          previousSpoken = spoken
-          await speak(spoken)
+          if (spoken !== previousSpoken) {
+            previousSpoken = spoken
+            await speak(spoken)
+          }
         }
       }
+      lastDetectionTime = currentTime
     }
 
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    // Use requestAnimationFrame for smoother and more efficient detection
+    requestAnimationFrame(detect)
   }
-}
 
+  detect() // Start the detection loop
+}
 
 onMounted(async () => {
   await tf.setBackend('webgl')
@@ -192,7 +178,7 @@ onMounted(async () => {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment' }
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } } // Lower resolution for mobile
     })
     videoRef.value.srcObject = stream
 
@@ -210,6 +196,23 @@ onMounted(async () => {
   model = await cocoSsd.load()
   console.log('✅ Model yuklandi')
 
+  // Asosiy doimiy aniqlash sikli
   detectLoop()
 })
 </script>
+
+<style scoped>
+.loader {
+  border: 4px solid #f3f3f3; /* Light grey */
+  border-top: 4px solid #3498db; /* Blue */
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+</style>
