@@ -73,7 +73,7 @@ function estimateDistance(boxHeight, label) {
     return `${centimeters} santimetr`
   }
 
-  return `${meters}m ${centimeters} santimetr`
+  return `${meters}metr ${centimeters} santimetr`
 }
 
 
@@ -81,7 +81,7 @@ async function speak(text) {
   if (isSpeaking) return
   isSpeaking = true
 
-  const token = 'hNlGnXNPI6v8MleFCCza4MXbtuwRnYqICH5JGnJl'
+  const token = 'IB_TaNNYva_w6Gw7rKTjP4wpL98Monm9zlO-Te6y'
   const speaker_id = 1
 
   const formData = new URLSearchParams()
