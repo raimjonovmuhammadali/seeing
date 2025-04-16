@@ -20,7 +20,6 @@
   </div>
 </template>
 
-
 <script setup>
 import { ref, onMounted } from 'vue'
 import * as cocoSsd from '@tensorflow-models/coco-ssd'
@@ -69,14 +68,20 @@ function estimateDistance(boxHeight, label) {
   const meters = Math.floor(distance)
   const centimeters = Math.round((distance - meters) * 100)
 
-  return `${meters}m ${centimeters}cm`
+  // Agar masofa 0 metr bo'lsa, faqat santimetrni ko'rsating
+  if (meters === 0) {
+    return `${centimeters} santimetr`
+  }
+
+  return `${meters}m ${centimeters} santimetr`
 }
+
 
 async function speak(text) {
   if (isSpeaking) return
   isSpeaking = true
 
-  const token = 'f9q208KY3hraE64wU2rHHz0FtzhAk7K6XFCmMMLD'
+  const token = 'hNlGnXNPI6v8MleFCCza4MXbtuwRnYqICH5JGnJl'
   const speaker_id = 1
 
   const formData = new URLSearchParams()
@@ -91,15 +96,33 @@ async function speak(text) {
       body: formData,
     })
 
-    if (!response.ok) throw new Error(response.statusText)
+    // Agar server xatolik bergan bo'lsa, uni tekshiring
+    if (!response.ok) {
+      console.error('API xatosi:', response.statusText)
+      throw new Error('API xatosi')
+    }
 
     const blob = await response.blob()
+
+    // Agar audio yuklab olishda xato bo'lsa, xatolikni chiqarish
+    if (!blob) {
+      console.error('Audio yuklab olishda xato')
+      throw new Error('Audio yuklab olishda xato')
+    }
+
     const audio = new Audio(URL.createObjectURL(blob))
 
+    // Audio o‘ynash
     await new Promise(resolve => {
       audio.onended = () => { isSpeaking = false; resolve() }
-      audio.onerror = () => { isSpeaking = false; resolve() }
-      audio.play()
+      audio.onerror = (err) => { 
+        console.error('Audio o‘ynashda xato:', err) 
+        isSpeaking = false; resolve() 
+      }
+      audio.play().catch(err => {
+        console.error('Audio o‘ynashda xato:', err)
+        isSpeaking = false
+      })
     })
   } catch (err) {
     console.error('TTS xatosi:', err)
@@ -120,11 +143,15 @@ async function detectLoop() {
         const first = predictions[0]
         const labelUz = translateLabel(first.class)
         const distance = estimateDistance(first.bbox[3], first.class)
-        const spoken = `${labelUz}, ${distance} gacha`
 
-        if (spoken !== previousSpoken) {
-          previousSpoken = spoken
-          await speak(spoken)
+        // Agar masofa null bo'lsa, gapirmaslik
+        if (distance) {
+          const spoken = `${labelUz} gacha, ${distance}`
+
+          if (spoken !== previousSpoken) {
+            previousSpoken = spoken
+            await speak(spoken)
+          }
         }
       }
 
@@ -154,7 +181,6 @@ onMounted(async () => {
   detectLoop()
 })
 </script>
-
 
 <style scoped>
 .loader {
